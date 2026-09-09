@@ -1,0 +1,1 @@
+{"name":"carvalue-api","private":true,"version":"1.0.0","description":"Source-backed vehicle specifications and comparable asking-price valuation","engines":{"node":">=20"},"scripts":{"start":"node server.js","test":"node --test test/*.test.js"}}
