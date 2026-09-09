@@ -2,12 +2,14 @@
 const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { AppError, getListings, norm } = require('./source');
 const { resolveVehicle, publicVehicle, canonical } = require('./vehicles');
 const { priceVehicle, featureProfile } = require('./valuation');
 const reports = new Map();
 const publicRoot = path.resolve(__dirname, '../dist');
+const ML_PREDICT = path.resolve(__dirname, '../ml/predict.py');
 const staticFiles = new Set(['index.html', 'valuation.html', 'styles.css', 'app.js', 'results.js', 'catalog.js', 'car-studio.webp']);
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.webp': 'image/webp' };
 function validateInput(input, full = true) {
@@ -131,6 +133,21 @@ async function createReport(input, dependencies = {}) {
   };
   return report;
 }
+function mlPredict(payload) {
+  return new Promise((resolve, reject) => {
+    const arg = JSON.stringify(payload);
+    const proc = spawn('python', [ML_PREDICT, arg], { env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+    let out = '', err = '';
+    proc.stdout.on('data', d => { out += d; });
+    proc.stderr.on('data', d => { err += d; });
+    proc.on('close', code => {
+      try { resolve(JSON.parse(out.trim())); }
+      catch { reject(new Error(err.trim() || 'ML inference failed')); }
+    });
+    proc.on('error', reject);
+    setTimeout(() => { proc.kill(); reject(new Error('ML inference timed out')); }, 8000);
+  });
+}
 function createServer() {
   return http.createServer(async (req, res) => {
     try {
@@ -143,7 +160,14 @@ function createServer() {
       }
       if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); return res.end(); }
       const url = new URL(req.url, 'http://localhost');
-      if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { status: 'ok', service: 'carvalue-api', model: 'market-comparables-1.0', trainedModel: false, specificationSource: 'CarWale India', pricingBasis: 'Comparable asking prices; insufficient data produces no price.' });
+      if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { status: 'ok', service: 'carvalue-api', model: 'market-comparables-1.0', mlModel: 'xgboost-1.0', trainedModel: true, specificationSource: 'CarWale India', pricingBasis: 'Comparable asking prices + XGBoost ML estimate.' });
+      if (req.method === 'POST' && url.pathname === '/api/ml-predict') {
+        const body = await readBody(req);
+        if (!body.make || !body.year || !body.km) throw new AppError('INVALID_INPUT', 'make, year and km are required.', 400);
+        const result = await mlPredict({ brand: body.make, year: body.year, km: body.km, fuel: body.fuel || 'Petrol', transmission: body.transmission || 'Manual', owners: body.owners || 1 });
+        if (result.error) throw new AppError('ML_ERROR', result.error, 500);
+        return send(res, 200, result);
+      }
       if (req.method === 'GET' && url.pathname === '/api/vehicle') { const input = validateInput({ make: url.searchParams.get('make'), model: url.searchParams.get('model'), year: Number(url.searchParams.get('year')) }, false); return send(res, 200, publicVehicle(await resolveVehicle(input.make, input.model, input.year))); }
       if (req.method === 'POST' && url.pathname === '/api/predict') {
         const input = validateInput(await readBody(req)); const report = await createReport(input);
