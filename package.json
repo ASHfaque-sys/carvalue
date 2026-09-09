@@ -1,0 +1,1 @@
+{"name":"carvalue","version":"1.0.0","private":true,"description":"Equipment-aware vehicle specifications and market-comparable valuation","engines":{"node":">=20"},"scripts":{"start":"node backend/server.js","test":"node --test backend/test/*.test.js"}}
