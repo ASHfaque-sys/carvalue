@@ -1,0 +1,72 @@
+{
+  "features": [
+    "age",
+    "km_log",
+    "fuel_enc",
+    "trans_enc",
+    "owners",
+    "brand_enc",
+    "seg_enc"
+  ],
+  "current_year": 2026,
+  "brands": [
+    "Audi",
+    "BMW",
+    "Ford",
+    "Honda",
+    "Hyundai",
+    "Jeep",
+    "Kia",
+    "MG",
+    "Mahindra",
+    "Maruti Suzuki",
+    "Mercedes-Benz",
+    "Nissan",
+    "Renault",
+    "Skoda",
+    "Tata",
+    "Toyota",
+    "Volkswagen"
+  ],
+  "fuels": [
+    "CNG",
+    "Diesel",
+    "Petrol"
+  ],
+  "transmissions": [
+    "Automatic",
+    "Automatic (AMT)",
+    "Manual"
+  ],
+  "segments": [
+    "budget",
+    "luxury",
+    "mid",
+    "premium"
+  ],
+  "brand_segments": {
+    "Maruti Suzuki": "budget",
+    "Hyundai": "mid",
+    "Honda": "mid",
+    "Tata": "mid",
+    "Mahindra": "mid",
+    "Toyota": "premium",
+    "Kia": "mid",
+    "Skoda": "premium",
+    "Volkswagen": "premium",
+    "Ford": "mid",
+    "Renault": "budget",
+    "Nissan": "budget",
+    "MG": "premium",
+    "Jeep": "luxury",
+    "BMW": "luxury",
+    "Mercedes-Benz": "luxury",
+    "Audi": "luxury"
+  },
+  "metrics": {
+    "mae": 44680,
+    "rmse": 78171,
+    "r2": 0.9898,
+    "test_rows": 1400
+  }
+}
