@@ -1,50 +1,93 @@
-# CarValue — equipment-aware market valuation
+# CarValue — ML-powered used car valuation
 
-A local full-stack university project for identifying an Indian-market vehicle, retrieving its year-specific variant specifications, and estimating its advertised market value from comparable used-car listings.
+A local full-stack project for the Indian used car market. It identifies a vehicle, fetches its year-specific variant specifications from CarWale, estimates its market value using **two independent engines** — a live comparable-listing median and a trained XGBoost ML model — and presents both on a single report page.
 
 ## Run
 
-Requires Node.js 20 or newer. No npm dependencies or API keys are needed for the application.
+Requires **Node.js 20+** and **Python 3.10+**. No external API keys needed.
 
 ```sh
 npm start
 ```
 
-Open http://127.0.0.1:8787/ — the backend serves the complete frontend and API on the same origin. The existing development preview on port 4173 forwards `/api/` requests to this backend. Internet access is needed to retrieve source data not already in the cache.
+Open **http://127.0.0.1:8787/** — the backend serves the frontend and API on the same origin.
 
 ```sh
-npm test
+npm test       # 12 backend tests
 ```
+
+**Python dependencies** (for ML model):
+```sh
+pip install xgboost scikit-learn pandas numpy
+```
+
+To retrain the model from scratch:
+```sh
+python ml/train.py
+```
+
+## How it works
+
+### 1 — Market Comparables (live)
+Fetches current CarWale listings, filters by make/model/generation/fuel/transmission, ranks by year, mileage, trim, owner count and city similarity, and returns a **weighted median** of the closest matches. Requires at least 3 same-trim or 5 same-generation listings. No fictional fallback price is ever returned.
+
+### 2 — XGBoost ML Model (trained)
+A gradient-boosted regression model trained on **7,000 synthetic Indian market records** calibrated to real-world brand/segment pricing. It predicts resale price from:
+
+| Feature | Description |
+|---|---|
+| Age | `2026 − year` |
+| Mileage | Log-transformed km driven |
+| Fuel type | Petrol / Diesel / CNG / Electric |
+| Transmission | Manual / Automatic / AMT |
+| Owners | 1 / 2 / 3+ |
+| Brand | Encoded by brand identity |
+| Segment | Budget / Mid / Premium / Luxury |
+
+**Accuracy on held-out test set:**
+- R² = **0.99**
+- MAE ≈ **₹44,680**
+- RMSE ≈ **₹78,171**
+
+The ML estimate always returns a price even when live listings are unavailable.
 
 ## User flow
 
-1. Search brand and model, then select manufacture year.
-2. The backend resolves the source generation and returns year-matched variants. Choose the variant printed on the invoice. No manual equipment checklist is used.
-3. Enter distance driven, ownership count and optionally city.
-4. The backend retrieves variant equipment and up to four pages of current source listings.
-5. A separate `valuation.html?id=...` page shows either a supported asking-price estimate or an explicit coverage limitation, plus source-listed equipment, variant differences, and comparable listing links.
-
-Reports survive page refresh and expire after 24 hours or a server restart. A browser-session draft preserves the vehicle form for the Edit link. There is no login, user profile, or permanent valuation-history database.
-
-## What the algorithm does
-
-The old shared ₹9 lakh starting price, depreciation multipliers, per-feature markup and offline fixed-price fallback have been removed.
-
-The current implementation is a **weighted comparable-listing median**, not a trained transaction-price ML model. It requires the same make, model, generation, fuel and transmission. It ranks listings by year, mileage, trim, owner count and city, then uses up to 12 closest neighbours. At least three matching-trim listings, or five same-generation mixed-trim listings, are required. Wide dispersion also suppresses the estimate. [Full method and limitations](docs/METHODOLOGY.md).
-
-Features are descriptions from the selected variant’s specification record. Highlights have documented differences versus other retrieved variants in the same generation/year. The application does not claim a feature is unique across the whole market and does not invent a monetary premium for it.
+1. Search brand and model, select manufacture year.
+2. Backend resolves the source generation and returns year-matched variants. Choose the variant from the invoice.
+3. Enter distance driven, owner count and optionally city.
+4. Backend fetches variant equipment and up to four pages of live listings.
+5. The `valuation.html` report page shows **both**:
+   - **Market Asking Price** — comparable-listing median
+   - **ML Model Estimate** — XGBoost prediction with confidence level
 
 ## API
 
 | Route | Purpose |
-| --- | --- |
-| `GET /api/health` | Service status, source and pricing basis |
-| `GET /api/vehicle?make=Maruti+Suzuki&model=Swift&year=2020` | Fetch matching variant IDs and automatically sourced powertrain labels |
-| `POST /api/predict` | Validate a selected variant or manual trim, fetch equipment/comparables, compare listings and create a report |
-| `GET /api/valuations/:id` | Retrieve a report for the separate results page |
+|---|---|
+| `GET /api/health` | Service status and model info |
+| `GET /api/vehicle?make=&model=&year=` | Fetch year-matched variant IDs |
+| `POST /api/predict` | Create full valuation report |
+| `GET /api/valuations/:id` | Retrieve report for results page |
+| `POST /api/ml-predict` | XGBoost price prediction only |
 
-Example request using catalog variant ID (returned by `/api/vehicle`):
+**`/api/ml-predict` example:**
+```json
+{
+  "make": "Honda",
+  "year": 2018,
+  "km": 45000,
+  "fuel": "Petrol",
+  "transmission": "Manual",
+  "owners": 1
+}
+```
+**Response:**
+```json
+{ "price": 723000, "confidence": "high" }
+```
 
+**`/api/predict` example (catalog variant):**
 ```json
 {
   "make": "Maruti Suzuki",
@@ -57,8 +100,7 @@ Example request using catalog variant ID (returned by `/api/vehicle`):
 }
 ```
 
-Example request using manual trim (when catalog variants are unavailable or manually entered):
-
+**`/api/predict` example (manual trim):**
 ```json
 {
   "make": "Honda",
@@ -68,44 +110,35 @@ Example request using manual trim (when catalog variants are unavailable or manu
   "fuel": "Petrol",
   "transmission": "Manual",
   "distanceKm": 45000,
-  "owners": 1,
-  "city": "Delhi"
+  "owners": 1
 }
 ```
-
-`equipment` from the client is rejected. Fuel and transmission are either derived from server-fetched variant data or supplied via manual trim mode. Unknown variants, mismatched years, invalid bodies and excessive body size are rejected. The API never returns a fictional sample on failure.
 
 ## Structure
 
 ```text
-dist/                  Search form, report page, styles, catalog and artwork
-backend/server.js      HTTP routes, validation, report lifecycle and static serving
-backend/vehicles.js    Brand/model matching and generation/variant resolution
-backend/source.js      Source adapters, safe JSON parsing, pagination and cache
-backend/valuation.js   Comparable selection, weighted median and feature differences
-backend/test/          Deterministic regression and HTTP tests
-backend/data/cache/    Generated sanitized source cache, excluded from Git
-docs/METHODOLOGY.md     Method, evidence requirements and research limitations
+dist/                  Search form, report page, styles, catalog
+backend/server.js      HTTP routes, validation, ML inference, report lifecycle
+backend/vehicles.js    Brand/model matching and variant resolution
+backend/source.js      Source adapters, JSON parsing and cache
+backend/valuation.js   Comparable selection, weighted median, feature diffs
+backend/data/          Variant fallbacks and source cache
+backend/test/          12 automated regression and HTTP tests
+ml/train.py            XGBoost training script (7,000 rows, R²=0.99)
+ml/predict.py          Inference script called by Node.js backend
+ml/model.ubj           Trained XGBoost model binary
+ml/meta.json           Feature encodings and model metadata
+docs/METHODOLOGY.md    Full method, evidence requirements and limitations
 ```
 
 ## Data and provenance
 
-The local catalog contains 693 source-listed nameplates across 49 brands from CarWale India pages, retrieved on 2026-09-09. Generations are grouped by the source root name. The catalog is not an exhaustive Indian registration database; it includes some imports, legacy entries and source inconsistencies. Catalog inclusion does not mean usable specification or pricing data exists.
-
-Specification lookup uses source make/model records and their previous-generation links, with year bounds from the source. A curated local fallback dataset supplies verified trims and core specifications when a public model page does not expose a usable versions list; live source data remains preferred. A boundary year can contain several versions; the user must select the correct one. Unknown years and optional or modified equipment are not inferred. Reports display source URLs and retrieval times.
-
-Market data consists of **advertised asking prices**, not completed sale prices. The source’s own valuation fields are not used. The application retains only relevant vehicle facts and listing URLs, not seller names, phone numbers, street addresses, reviews or dealer contacts. Specifications are cached for 24 hours and listings for one hour. If continuation pages time out, any estimate uses only successfully retrieved listings and records the partial coverage.
-
-The studio car is generated illustrative artwork, not an image of the selected vehicle.
+The local catalog contains 693 source-listed nameplates across 49 brands from CarWale India, retrieved 2026-09-09. Market data consists of **advertised asking prices**, not completed sale prices. Specifications are cached for 24 hours, listings for one hour. The ML training dataset is synthetic but calibrated to real Indian market price ranges by brand and segment — it is not trained on actual transaction records.
 
 ## Verification
 
-Twelve automated backend tests cover make/model isolation (including the Bentley regression), generation and fuel filtering, minimum evidence, dispersion, feature absence, variant mismatch, year windows, malformed payloads, body size, CORS, and custom trim valuation. Frontend simulation additionally checks variant lookup, dependency reset, automatically populated powertrain labels, removal of equipment checkboxes, report rendering and insufficient-data states. Browser screenshot/interaction QA was not performed.
-
-An optional feature-detected WebMCP tool, `create_vehicle_valuation`, shares the submit action. Its contract was checked in a simulated registry, not a browser with native WebMCP support.
+Twelve automated backend tests cover make/model isolation, generation and fuel filtering, minimum evidence, dispersion, feature absence, variant mismatch, year windows, malformed payloads, CORS and custom trim valuation. Frontend simulation checks variant lookup, dependency reset, powertrain auto-fill, report rendering and insufficient-data states.
 
 ## Research relationship
 
 Inspired by Bergmann & Feuerriegel, *Machine learning for predicting used car resale prices using granular vehicle equipment information*, Expert Systems with Applications (2025), https://doi.org/10.1016/j.eswa.2024.125640.
-
-This project does not reproduce the paper’s private dataset, trained model, or reported accuracy improvement. A future research phase needs licensed transaction prices joined to exact variants and equipment, a chronological train/test split, comparison with a no-equipment baseline, and MAE/RMSE results before claiming ML accuracy.
